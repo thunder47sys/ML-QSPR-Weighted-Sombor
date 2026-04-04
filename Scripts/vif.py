@@ -1,60 +1,64 @@
-# @title Calculate VIF Scores for 28 Weighted Sombor Indices
 import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-from statsmodels.tools.tools import add_constant
 from google.colab import files
 import io
-import warnings
 
-warnings.filterwarnings('ignore')
-
+# 1. UPLOAD STEP
 print("--- UPLOAD STEP ---")
-print("Please upload your Master Dataset containing the 28 Weighted Sombor Indices.")
+print("Please upload your dataset (e.g., Data_Alpha_Geometric_Weighted_Sombor_Indices.csv)")
 uploaded = files.upload()
-
 filename = next(iter(uploaded))
 
-try:
-    # Read the data
-    if filename.endswith('.xlsx') or filename.endswith('.xls'):
-        df = pd.read_excel(io.BytesIO(uploaded[filename]))
-    else:
-        df = pd.read_csv(io.BytesIO(uploaded[filename]))
-    
-    # Keep only the numerical columns
-    df_numeric = df.select_dtypes(include=['number'])
-    
-    # Remove the target properties so we only test the topological indices
-    targets_to_remove = ['Boiling Point', 'BP', 'Molar Volume', 'MV', 'Flash Point', 'FP', 
-                         'Polarizability', 'Pol', 'Molar Refractivity', 'MR', 'Density', 'D']
-    
-    features = df_numeric.copy()
-    for col in df_numeric.columns:
-        for target in targets_to_remove:
-            if target.lower() in col.lower() and col in features.columns:
-                features = features.drop(columns=[col])
+# Read the file
+if filename.endswith('.xlsx') or filename.endswith('.xls'):
+    df = pd.read_excel(io.BytesIO(uploaded[filename]))
+else:
+    df = pd.read_csv(io.BytesIO(uploaded[filename]), encoding='latin1')
 
-    print(f"\nCalculating VIF for {len(features.columns)} features...")
+# 2. IDENTIFY ALL 28 INDICES
+all_indices = [col for col in df.columns if any(tag in col for tag in ['_SO', '_ESO', '_MESO'])]
+print(f"\nProcessing {len(all_indices)} indices...")
 
-    # Add a constant (This is mathematically required to calculate VIF correctly)
-    X = add_constant(features)
+# 3. GENERATE HIGH-RESOLUTION CORRELATION MATRIX
+print("\n--- Generating High-Res Correlation Matrix ---")
+corr_matrix = df[all_indices].corr().abs()
 
-    # Calculate VIF for every single feature
-    vif_data = pd.DataFrame()
-    vif_data["Feature"] = X.columns
-    vif_data["VIF Score"] = [variance_inflation_factor(X.values, i) for i in range(len(X.columns))]
+plt.figure(figsize=(24, 20))
+sns.heatmap(corr_matrix, cmap='RdBu_r', vmin=0.8, vmax=1.0, 
+            square=True, linewidths=0.5, linecolor='white',
+            cbar_kws={"shrink": .8, "label": "Absolute Correlation"})
 
-    # Sort the scores from Highest to Lowest
-    vif_data = vif_data.sort_values(by="VIF Score", ascending=False).reset_index(drop=True)
+plt.xticks(rotation=45, ha='right', fontsize=14, fontweight='bold')
+plt.yticks(rotation=0, fontsize=14, fontweight='bold')
+plt.title('Pearson Correlation Matrix of Weighted Sombor Indices', fontsize=26, pad=20, fontweight='bold')
+plt.tight_layout()
 
-    print("\n--- TOP HIGHEST VIF SCORES ---")
-    print(vif_data.head(10))
-    
-    # Download the final table
-    out_filename = "Calculated_VIF_Scores.csv"
-    vif_data.to_csv(out_filename, index=False)
-    files.download(out_filename)
-    print(f"\nSUCCESS! The complete VIF table has been downloaded as '{out_filename}'.")
+# Save and download the image
+hq_filename = 'HQ_Correlation_Matrix.png'
+plt.savefig(hq_filename, dpi=600, bbox_inches='tight')
+plt.show()
+files.download(hq_filename)
 
-except Exception as e:
-    print(f"Critical Error: {e}")
+# 4. SELECT THE 2 FINAL NON-NOISE INDICES & CALCULATE VIF
+final_indices = ['mass_SO', 'en_MESO']
+print(f"\n--- Calculating VIF for selected indices: {final_indices} ---")
+
+# Drop missing values to prevent math errors
+X_final = df[final_indices].dropna()
+
+vif_data = pd.DataFrame()
+vif_data["Feature"] = X_final.columns
+vif_data["VIF Score"] = [variance_inflation_factor(X_final.values, i) for i in range(len(X_final.columns))]
+
+print("\n--- FINAL VIF SCORES ---")
+print(vif_data)
+
+# Save and download the VIF table
+vif_filename = 'Final_VIF_Scores.csv'
+vif_data.to_csv(vif_filename, index=False)
+files.download(vif_filename)
+
+print(f"\nSuccess! Both '{hq_filename}' and '{vif_filename}' have been downloaded.")
